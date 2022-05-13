@@ -14,30 +14,39 @@ function __xpath(el) {
   return xpath(el.parentNode) + '/' + el.tagName.toLowerCase() + (sames.length > 1 ? '['+([].indexOf.call(sames, el)+1)+']' : '');
 }
 
+function __prepareValueToBeSerialized(value) {
+  if (value === undefined) return "undefined";
+  if (value === null) return null;
+  if (['boolean', 'number', 'bigint', 'string', 'symbol'].includes(typeof(value))) return value;
+  if (typeof(value) == 'function') return value.toString();
+  if (value instanceof Window) return 'window';
+  if (value instanceof HTMLDocument) return 'document';
+  if (value instanceof Node) {
+    const s = {};
+    try { s.xpath = __xpath(value) } catch (e) { s.xpath = null };
+    s.outerHTML = value.outerHTML;
+    s.style = value.style;
+    return s;
+  };
+  try { if (value.__proxy_target.constructor.name !== 'Object') return `${value.__proxy_target.constructor.name} - ${value.__proxy_target.toString()}` } catch (e) { }
+  try { if (value.constructor.name !== 'Object') return `${value.constructor.name} - ${value.toString()}` } catch (e) { return 'UnknownObjectClass' }
+  try { if (value.__instance_of_proxy) return 'proxy_object' } catch (e) { };
+  return "serialization-failed";
+}
+
 function __serialize(object) {
-  if (object === undefined) return "undefined";
-  if (object === null) return "null";
-  if (['boolean', 'number', 'bigint', 'string', 'symbol'].includes(typeof(object))) return JSON.stringify(object)
-  if (typeof(object) == 'function') return object.toString();
+  const serialized = __prepareValueToBeSerialized(object);
+  if (serialized != "serialization-failed")
+    if (typeof(serialized) === 'string') { return serialized } else { return JSON.stringify(serialized) };
   return JSON.stringify(object, function(k, v) {
-    if (v === undefined) return '__undefined__';
-    if (object === null) return "null";
-    if (v instanceof Window) return 'window';
-    if (v instanceof HTMLDocument) return 'document';
-    if (v instanceof Node) {
-      const s = {};
-      try { s.xpath = __xpath(v) } catch (e) { s.xpath = null };
-      s.outerHTML = v.outerHTML;
-      s.style = v.style;
-      return JSON.stringify(s);
-    };
-    if (typeof(v) == 'function') return v.toString();
-    try { if (v.__instance_of_proxy) return v.__proxy_target } catch (e) { };
+    if (k == '') return v;
+    const serializedValue = __prepareValueToBeSerialized(v);
+    if (serializedValue != 'serialization-failed') return serializedValue;
     return v;
   });
 }
 
-function __logMessage(message) { if (__logActive) console.log(message); }
+function __logMessage(message) { if (__logActive) console.debug(message); }
 
 function __logObject(obj={}) {
   let msg = {}
@@ -70,7 +79,7 @@ function __buildProxy(object, path) {
         if (key == '__instance_of_proxy') {
           return_value = true;
         } else if (key == '__proxy_target') {
-          return_value = true;
+          return_value = originalTarget;
         } else {
           return_value = Reflect.get(target, key);
         }
@@ -81,6 +90,10 @@ function __buildProxy(object, path) {
       set: function (target, key, value) {
         __logObject({event: 'proxy-object-set', path: `${path}.${key}`, typeof: typeof(value), value: value});
         return Reflect.set(target, key, value);
+      },
+      getPrototypeOf: function (target) {
+        __logObject({event: 'proxy-object-prototype', path: path});
+        return originalTarget.__proto__;
       },
       // deleteProperty: function (target, key) {
       //   __logObject({event: 'deleteProperty', path: path, key: key});
